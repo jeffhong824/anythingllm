@@ -7,6 +7,7 @@ const { User } = require("../models/user");
 const { DocumentVectors } = require("../models/vectors");
 const { Workspace } = require("../models/workspace");
 const { WorkspaceChats } = require("../models/workspaceChats");
+const { WorkspaceUser } = require("../models/workspaceUsers");
 const {
   getVectorDbClass,
   getEmbeddingEngineSelection,
@@ -223,9 +224,21 @@ function adminEndpoints(app) {
   app.get(
     "/admin/workspaces",
     [validatedRequest, strictMultiUserRoleValid([ROLES.admin, ROLES.manager])],
-    async (_request, response) => {
+    async (request, response) => {
       try {
-        const workspaces = await Workspace.whereWithUsers();
+        const user = await userFromSession(request, response);
+        let workspaces;
+        if (user?.role === ROLES.admin) {
+          workspaces = await Workspace.whereWithUsers();
+        } else {
+          workspaces = await Workspace.whereWithUser(user);
+          for (const workspace of workspaces) {
+            const rels = await WorkspaceUser.where({
+              workspace_id: Number(workspace.id),
+            });
+            workspace.userIds = rels.map((r) => r.user_id);
+          }
+        }
         response.status(200).json({ workspaces });
       } catch (e) {
         console.error(e);
@@ -273,7 +286,20 @@ function adminEndpoints(app) {
     [validatedRequest, strictMultiUserRoleValid([ROLES.admin, ROLES.manager])],
     async (request, response) => {
       try {
+        const user = await userFromSession(request, response);
         const { workspaceId } = request.params;
+        if (user?.role === ROLES.manager) {
+          const workspaces = await Workspace.whereWithUser(user);
+          const allowedIds = workspaces.map((w) => w.id);
+          if (!allowedIds.includes(Number(workspaceId))) {
+            response.status(403).json({
+              success: false,
+              error:
+                "You can only assign members to workspaces you created or were assigned to.",
+            });
+            return;
+          }
+        }
         const { userIds } = reqBody(request);
         const { success, error } = await Workspace.updateUsers(
           workspaceId,
