@@ -128,6 +128,8 @@ function writeToServerDocuments({
   let destination = null;
   if (destinationOverride) destination = path.resolve(destinationOverride);
   else if (options.parseOnly) destination = path.resolve(directUploadsFolder);
+  else if (options.destinationSubfolder)
+    destination = path.resolve(documentsFolder, options.destinationSubfolder);
   else destination = path.resolve(documentsFolder, "custom-documents");
 
   if (!fs.existsSync(destination))
@@ -140,12 +142,13 @@ function writeToServerDocuments({
     encoding: "utf-8",
   });
 
+  const locationRelative = path
+    .relative(documentsFolder, destinationFilePath)
+    .replace(/\\/g, "/");
   return {
     ...data,
     // relative location string that can be passed into the /update-embeddings api
-    // that will work since we know the location exists and since we only allow
-    // 1-level deep folders this will always work. This still works for integrations like GitHub and YouTube.
-    location: destinationFilePath.split("/").slice(-2).join("/"),
+    location: locationRelative,
     isDirectUpload: options.parseOnly || false,
   };
 }

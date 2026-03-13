@@ -34,6 +34,7 @@ const { getTTSProvider } = require("../utils/TextToSpeech");
 const { WorkspaceThread } = require("../models/workspaceThread");
 
 const truncate = require("truncate");
+const { DocumentOwner } = require("../models/documentOwners");
 const { purgeDocument } = require("../utils/files/purgeDocument");
 const { getModelTag } = require("./utils");
 const { searchWorkspaceAndThreads } = require("../utils/helpers/search");
@@ -118,6 +119,7 @@ function workspaceEndpoints(app) {
     ],
     async function (request, response) {
       try {
+        const user = await userFromSession(request, response);
         const Collector = new CollectorApi();
         const { originalname } = request.file;
         const processingOnline = await Collector.online();
@@ -133,11 +135,23 @@ function workspaceEndpoints(app) {
           return;
         }
 
-        const { success, reason } =
-          await Collector.processDocument(originalname);
+        const managerSubfolder =
+          user?.role === ROLES.manager ? `manager-${user.id}` : null;
+        const metadata = managerSubfolder
+          ? { targetSubfolder: managerSubfolder }
+          : {};
+        const { success, reason, documents = [] } =
+          await Collector.processDocument(originalname, metadata);
         if (!success) {
           response.status(500).json({ success: false, error: reason }).end();
           return;
+        }
+
+        if (user?.id && Array.isArray(documents)) {
+          for (const doc of documents) {
+            if (doc?.location)
+              await DocumentOwner.setIfMissing(doc.location, user.id);
+          }
         }
 
         Collector.log(
@@ -909,8 +923,13 @@ function workspaceEndpoints(app) {
           return;
         }
 
+        const managerSubfolder =
+          user?.role === ROLES.manager ? `manager-${user.id}` : null;
+        const metadata = managerSubfolder
+          ? { targetSubfolder: managerSubfolder }
+          : {};
         const { success, reason, documents } =
-          await Collector.processDocument(originalname);
+          await Collector.processDocument(originalname, metadata);
         if (!success || documents?.length === 0) {
           response.status(500).json({ success: false, error: reason }).end();
           return;
@@ -970,6 +989,16 @@ function workspaceEndpoints(app) {
 
         if (!currWorkspace || !body.documentLocation)
           return response.sendStatus(400).end();
+
+        if (user?.role === ROLES.manager) {
+          const allowed = await DocumentOwner.getAllowedDocpathsForUser(user);
+          if (!allowed.has(body.documentLocation)) {
+            response.status(403).json({
+              error: "You can only remove documents you uploaded.",
+            });
+            return;
+          }
+        }
 
         // Will delete the document from the entire system + wil unembed it.
         await purgeDocument(body.documentLocation);

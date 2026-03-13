@@ -21,6 +21,9 @@ const RESERVED_FILES = ["__HOTDIR__.md"];
  * @returns {Promise<{success: boolean, reason: string, documents: Object[]}>} - The documents from the file processing
  */
 async function processSingleFile(targetFilename, options = {}, metadata = {}) {
+  if (metadata.targetSubfolder) {
+    options = { ...options, destinationSubfolder: metadata.targetSubfolder };
+  }
   const fullFilePath = path.resolve(
     WATCH_DIRECTORY,
     normalizePath(targetFilename)

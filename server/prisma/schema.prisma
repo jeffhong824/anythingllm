@@ -38,6 +38,12 @@ model workspace_documents {
   document_sync_queues document_sync_queues?
 }
 
+model document_owners {
+  docpath              String   @id
+  uploaded_by_user_id  Int?
+  lastUpdatedAt        DateTime @default(now())
+}
+
 model invites {
   id            Int      @id @default(autoincrement())
   code          String   @unique

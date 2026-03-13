@@ -1,8 +1,14 @@
 process.env.NODE_ENV === "development"
   ? require("dotenv").config({ path: `.env.${process.env.NODE_ENV}` })
   : require("dotenv").config();
-const { viewLocalFiles, normalizePath, isWithin } = require("../utils/files");
+const {
+  viewLocalFiles,
+  normalizePath,
+  isWithin,
+  documentsPath,
+} = require("../utils/files");
 const { purgeDocument, purgeFolder } = require("../utils/files/purgeDocument");
+const { DocumentOwner } = require("../models/documentOwners");
 const { getVectorDbClass } = require("../utils/helpers");
 const { updateENV, dumpENV } = require("../utils/helpers/updateENV");
 const {
@@ -448,7 +454,17 @@ function systemEndpoints(app) {
     [validatedRequest, flexUserRoleValid([ROLES.admin, ROLES.manager])],
     async (request, response) => {
       try {
+        const user = await userFromSession(request, response);
         const { name } = reqBody(request);
+        if (user?.role === ROLES.manager) {
+          const allowed = await DocumentOwner.getAllowedDocpathsForUser(user);
+          if (!allowed.has(name)) {
+            response.status(403).json({
+              error: "You can only remove documents you uploaded.",
+            });
+            return;
+          }
+        }
         await purgeDocument(name);
         response.sendStatus(200).end();
       } catch (e) {
@@ -463,8 +479,19 @@ function systemEndpoints(app) {
     [validatedRequest, flexUserRoleValid([ROLES.admin, ROLES.manager])],
     async (request, response) => {
       try {
+        const user = await userFromSession(request, response);
         const { names } = reqBody(request);
-        for await (const name of names) await purgeDocument(name);
+        if (user?.role === ROLES.manager) {
+          const allowed = await DocumentOwner.getAllowedDocpathsForUser(user);
+          const disallowed = (names || []).filter((n) => !allowed.has(n));
+          if (disallowed.length > 0) {
+            response.status(403).json({
+              error: "You can only remove documents you uploaded.",
+            });
+            return;
+          }
+        }
+        for await (const name of names || []) await purgeDocument(name);
         response.sendStatus(200).end();
       } catch (e) {
         console.error(e.message, e);
@@ -478,7 +505,25 @@ function systemEndpoints(app) {
     [validatedRequest, flexUserRoleValid([ROLES.admin, ROLES.manager])],
     async (request, response) => {
       try {
+        const user = await userFromSession(request, response);
         const { name } = reqBody(request);
+        if (user?.role === ROLES.manager) {
+          const allowed = await DocumentOwner.getAllowedDocpathsForUser(user);
+          const folderPath = path.resolve(documentsPath, normalizePath(name || ""));
+          if (fs.existsSync(folderPath) && fs.lstatSync(folderPath).isDirectory()) {
+            const entries = fs.readdirSync(folderPath);
+            const docpathsInFolder = entries
+              .filter((f) => path.extname(f) === ".json")
+              .map((f) => `${name}/${f}`);
+            const disallowed = docpathsInFolder.filter((p) => !allowed.has(p));
+            if (disallowed.length > 0) {
+              response.status(403).json({
+                error: "You can only remove folders containing only documents you uploaded.",
+              });
+              return;
+            }
+          }
+        }
         await purgeFolder(name);
         response.sendStatus(200).end();
       } catch (e) {
@@ -491,9 +536,10 @@ function systemEndpoints(app) {
   app.get(
     "/system/local-files",
     [validatedRequest, flexUserRoleValid([ROLES.admin, ROLES.manager])],
-    async (_, response) => {
+    async (request, response) => {
       try {
-        const localFiles = await viewLocalFiles();
+        const user = await userFromSession(request, response);
+        const localFiles = await viewLocalFiles(user);
         response.status(200).json({ localFiles });
       } catch (e) {
         console.error(e.message, e);

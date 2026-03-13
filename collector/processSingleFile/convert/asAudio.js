@@ -67,7 +67,10 @@ async function asAudio({
   const document = writeToServerDocuments({
     data,
     filename: `${slugify(filename)}-${data.id}`,
-    options: { parseOnly: options.parseOnly },
+    options: {
+      parseOnly: options.parseOnly,
+      destinationSubfolder: options.destinationSubfolder,
+    },
   });
   trashFile(fullFilePath);
   console.log(

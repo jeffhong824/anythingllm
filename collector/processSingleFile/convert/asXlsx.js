@@ -89,22 +89,14 @@ async function asXlsx({
         data: combinedData,
         filename: `${slugify(path.basename(filename))}-${combinedData.id}`,
         destinationOverride: null,
-        options: { parseOnly: true },
+        options: {
+          parseOnly: true,
+          destinationSubfolder: options.destinationSubfolder,
+        },
       });
       documents.push(document);
       console.log(`[SUCCESS]: ${filename} converted & ready for embedding.`);
     } else {
-      const folderName = slugify(
-        `${path.basename(filename)}-${v4().slice(0, 4)}`,
-        {
-          lower: true,
-          trim: true,
-        }
-      );
-      const outFolderPath = path.resolve(documentsFolder, folderName);
-      if (!fs.existsSync(outFolderPath))
-        fs.mkdirSync(outFolderPath, { recursive: true });
-
       for (const sheet of workSheetsFromFile) {
         const processed = processSheet(sheet);
         if (!processed) continue;
@@ -112,7 +104,7 @@ async function asXlsx({
         const { name, content, wordCount } = processed;
         const sheetData = {
           id: v4(),
-          url: `file://${path.join(outFolderPath, `${slugify(name)}.csv`)}`,
+          url: `file://${fullFilePath}`,
           title: metadata.title || `${filename} - Sheet:${name}`,
           docAuthor: metadata.docAuthor || "Unknown",
           description:
@@ -125,11 +117,15 @@ async function asXlsx({
           token_count_estimate: tokenizeString(content),
         };
 
+        const sheetFilename = `${slugify(path.basename(filename))}-sheet-${slugify(name)}`;
         const document = writeToServerDocuments({
           data: sheetData,
-          filename: `sheet-${slugify(name)}`,
-          destinationOverride: outFolderPath,
-          options: { parseOnly: options.parseOnly },
+          filename: sheetFilename,
+          destinationOverride: null,
+          options: {
+            parseOnly: options.parseOnly,
+            destinationSubfolder: options.destinationSubfolder,
+          },
         });
         documents.push(document);
         console.log(

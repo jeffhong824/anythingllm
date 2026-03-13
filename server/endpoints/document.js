@@ -1,6 +1,7 @@
 const { Document } = require("../models/documents");
+const { DocumentOwner } = require("../models/documentOwners");
 const { normalizePath, documentsPath, isWithin } = require("../utils/files");
-const { reqBody } = require("../utils/http");
+const { reqBody, userFromSession } = require("../utils/http");
 const {
   flexUserRoleValid,
   ROLES,
@@ -46,7 +47,20 @@ function documentEndpoints(app) {
     [validatedRequest, flexUserRoleValid([ROLES.admin, ROLES.manager])],
     async (request, response) => {
       try {
+        const user = await userFromSession(request, response);
         const { files } = reqBody(request);
+        if (user?.role === ROLES.manager) {
+          const allowed = await DocumentOwner.getAllowedDocpathsForUser(user);
+          const fromPaths = files.map(({ from }) => from);
+          const disallowed = fromPaths.filter((p) => !allowed.has(p));
+          if (disallowed.length > 0) {
+            response.status(403).json({
+              success: false,
+              message: "You can only move documents you uploaded.",
+            });
+            return;
+          }
+        }
         const docpaths = files.map(({ from }) => from);
         const documents = await Document.where({ docpath: { in: docpaths } });
 

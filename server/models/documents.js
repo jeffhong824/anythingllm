@@ -5,6 +5,7 @@ const { Telemetry } = require("./telemetry");
 const { EventLogs } = require("./eventLogs");
 const { safeJsonParse } = require("../utils/http");
 const { getModelTag } = require("../endpoints/utils");
+const { DocumentOwner } = require("./documentOwners");
 
 const Document = {
   writable: ["pinned", "watched", "lastUpdatedAt"],
@@ -121,6 +122,7 @@ const Document = {
       try {
         await prisma.workspace_documents.create({ data: newDoc });
         embedded.push(path);
+        if (userId) await DocumentOwner.setIfMissing(path, userId);
       } catch (error) {
         console.error(error.message);
       }

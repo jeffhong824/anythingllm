@@ -2,7 +2,9 @@ const fs = require("fs");
 const path = require("path");
 const { v5: uuidv5 } = require("uuid");
 const { Document } = require("../../models/documents");
+const { DocumentOwner } = require("../../models/documentOwners");
 const { DocumentSyncQueue } = require("../../models/documentSyncQueue");
+const { ROLES } = require("../middleware/multiUserProtected");
 const documentsPath =
   process.env.NODE_ENV === "development"
     ? path.resolve(__dirname, `../../storage/documents`)
@@ -32,8 +34,19 @@ async function fileData(filePath = null) {
   return JSON.parse(data);
 }
 
-async function viewLocalFiles() {
+async function viewLocalFiles(user = null) {
   if (!fs.existsSync(documentsPath)) fs.mkdirSync(documentsPath);
+
+  // Default role: no access to 我的文件
+  if (user?.role === ROLES.default) {
+    return { name: "documents", type: "folder", items: [] };
+  }
+
+  const allowedDocpaths =
+    user && user.role === ROLES.manager
+      ? await DocumentOwner.getAllowedDocpathsForUser(user)
+      : null; // Admin or no user: null = all allowed
+
   const liveSyncAvailable = await DocumentSyncQueue.enabled();
   const directory = {
     name: "documents",
@@ -60,6 +73,8 @@ async function viewLocalFiles() {
         const subfile = subfiles[i];
         const cachefilename = `${file}/${subfile}`;
         if (path.extname(subfile) !== ".json") continue;
+        if (allowedDocpaths !== null && !allowedDocpaths.has(cachefilename))
+          continue;
         filePromises.push(
           fileToPickerData({
             pathToFile: path.join(folderPath, subfile),
@@ -70,12 +85,12 @@ async function viewLocalFiles() {
         filenames[cachefilename] = subfile;
       }
       const results = await Promise.all(filePromises)
-        .then((results) => results.filter((i) => !!i)) // Remove null results
-        .then((results) => results.filter((i) => hasRequiredMetadata(i))); // Remove invalid file structures
+        .then((results) => results.filter((i) => !!i))
+        .then((results) => results.filter((i) => hasRequiredMetadata(i)));
       subdocs.items.push(...results);
 
-      // Grab the pinned workspaces and watched documents for this folder's documents
-      // at the time of the query so we don't have to re-query the database for each file
+      if (subdocs.items.length === 0) continue;
+
       const pinnedWorkspacesByDocument =
         await getPinnedWorkspacesByDocument(filenames);
       const watchedDocumentsFilenames =
@@ -90,7 +105,6 @@ async function viewLocalFiles() {
     }
   }
 
-  // Make sure custom-documents is always the first folder in picker
   directory.items = [
     directory.items.find((folder) => folder.name === "custom-documents"),
     ...directory.items.filter((folder) => folder.name !== "custom-documents"),
